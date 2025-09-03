@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Time Lock</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+  </head>
+  <body class="bg-gray-950 text-gray-100 font-sans">
+    <div class="min-h-screen flex flex-col">
+      <!-- Header -->
+      <header class="p-6 border-b border-gray-800 text-center">
+        <h1 class="text-4xl font-extrabold bg-gradient-to-r from-blue-400 to-pink-400 text-transparent bg-clip-text">⏳ Time Lock</h1>
+        <p class="text-gray-400 mt-2">Secure your files until the time is right.</p>
+      </header>
+
+      <!-- Main -->
+      <main class="flex-1 container mx-auto p-6">
+        <!-- My Lockers -->
+        <div class="flex justify-between items-center mb-4">
+          <h2 class="text-2xl font-semibold">My Lockers</h2>
+          <button id="newLockerBtn" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded-lg">+ Create New Locker</button>
+        </div>
+        <div id="lockersContainer" class="grid md:grid-cols-2 gap-4"></div>
+      </main>
+
+      <!-- Footer -->
+      <footer class="p-4 text-center text-sm text-gray-500 border-t border-gray-800">
+        ⚠️ This app stores data in your browser. Clearing your browser data will delete lockers & files.
+      </footer>
+    </div>
+
+    <!-- Modal -->
+    <div id="lockerModal" class="hidden fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+      <div class="bg-gray-900 p-6 rounded-xl max-w-lg w-full">
+        <h3 class="text-xl font-bold mb-4">Create a New Time Locker</h3>
+        <form id="lockerForm" class="space-y-3">
+          <input type="text" id="lockerName" placeholder="Locker Name" required class="w-full p-2 rounded bg-gray-800 border border-gray-700" />
+          <input type="password" id="lockerPassword" placeholder="Password" required class="w-full p-2 rounded bg-gray-800 border border-gray-700" />
+          <input type="datetime-local" id="unlockTime" required class="w-full p-2 rounded bg-gray-800 border border-gray-700" />
+          <input type="file" id="lockerFiles" multiple class="w-full text-gray-300" />
+          <div class="flex justify-end gap-2 pt-2">
+            <button type="button" id="cancelBtn" class="px-4 py-2 bg-gray-700 rounded-lg">Cancel</button>
+            <button type="submit" class="px-4 py-2 bg-green-600 rounded-lg">Lock Files</button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <script>
+      const newLockerBtn = document.getElementById("newLockerBtn");
+      const lockerModal = document.getElementById("lockerModal");
+      const cancelBtn = document.getElementById("cancelBtn");
+      const lockerForm = document.getElementById("lockerForm");
+      const lockersContainer = document.getElementById("lockersContainer");
+
+      let lockers = JSON.parse(localStorage.getItem("timeLockers") || "[]");
+
+      // Open modal
+      newLockerBtn.onclick = () => lockerModal.classList.remove("hidden");
+      cancelBtn.onclick = () => lockerModal.classList.add("hidden");
+
+      // Save locker
+      lockerForm.onsubmit = async (e) => {
+        e.preventDefault();
+        const name = document.getElementById("lockerName").value;
+        const password = document.getElementById("lockerPassword").value;
+        const unlockTime = document.getElementById("unlockTime").value;
+        const files = document.getElementById("lockerFiles").files;
+
+        // hash password
+        const enc = new TextEncoder().encode(password);
+        const hashBuffer = await crypto.subtle.digest("SHA-256", enc);
+        const hash = Array.from(new Uint8Array(hashBuffer)).map(b=>b.toString(16).padStart(2,"0")).join("");
+
+        let fileData = [];
+        for (let file of files) {
+          const base64 = await file.arrayBuffer().then(buf => btoa(String.fromCharCode(...new Uint8Array(buf))));
+          fileData.push({ name: file.name, data: base64 });
+        }
+
+        lockers.push({ id: Date.now(), name, hash, unlockTime, files: fileData });
+        localStorage.setItem("timeLockers", JSON.stringify(lockers));
+
+        lockerForm.reset();
+        lockerModal.classList.add("hidden");
+        renderLockers();
+      };
+
+      // Render lockers
+      function renderLockers() {
+        lockersContainer.innerHTML = "";
+        if (lockers.length === 0) {
+          lockersContainer.innerHTML = `<div class="col-span-2 p-6 text-center text-gray-400 border border-dashed border-gray-700 rounded-xl">No lockers found</div>`;
+          return;
+        }
+        lockers.forEach(locker => {
+          const unlocked = new Date() >= new Date(locker.unlockTime);
+          const card = document.createElement("div");
+          card.className = "p-4 bg-gray-900 rounded-xl border border-gray-800 flex flex-col justify-between";
+          card.innerHTML = `
+            <h3 class="text-lg font-semibold mb-2">${locker.name} ${unlocked ? "🔓" : "🔒"}</h3>
+            <p class="text-sm text-gray-400 mb-3">${unlocked ? "Unlocked at" : "Locked until"}: ${locker.unlockTime}</p>
+            <button class="px-3 py-1 bg-blue-600 rounded-lg viewBtn">View</button>
+          `;
+          card.querySelector(".viewBtn").onclick = () => viewLocker(locker);
+          lockersContainer.appendChild(card);
+        });
+      }
+
+      function viewLocker(locker) {
+        if (new Date() < new Date(locker.unlockTime)) {
+          alert("⏳ This locker is still locked!");
+          return;
+        }
+        const pass = prompt("Enter password:");
+        if (!pass) return;
+        const enc = new TextEncoder().encode(pass);
+        crypto.subtle.digest("SHA-256", enc).then(hashBuffer => {
+          const hash = Array.from(new Uint8Array(hashBuffer)).map(b=>b.toString(16).padStart(2,"0")).join("");
+          if (hash !== locker.hash) {
+            alert("❌ Wrong password!");
+            return;
+          }
+          // show files
+          locker.files.forEach(f => {
+            const link = document.createElement("a");
+            link.href = "data:application/octet-stream;base64," + f.data;
+            link.download = f.name;
+            link.click();
+          });
+        });
+      }
+
+      renderLockers();
+    </script>
+  </body>
+</html>
